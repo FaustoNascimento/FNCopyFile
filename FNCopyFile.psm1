@@ -46,31 +46,21 @@ function Copy-FNFileToSession
 				[Switch] $Force
 			)
 
-            $scriptBlockOpenFile = {
-	            if ((Test-Path -Path $using:DestinationFile -PathType Leaf) -and -not $using:Force)
-	            {
-		            if (-not $using:Force)
-		            {
-			            Write-Error 'File already exists.'
-			            return
-		            }
-	            }
-
-	            $writeStream = ([IO.FileInfo]$using:DestinationFile).Open([IO.FileMode]::Create)
-            }
-
-			$scriptBlockCloseFile = {
-				if ($writeStream)
-				{
-					$writeStream.Close()
-
-					[GC]::Collect()
-				}
-			}
-
 			try
 			{
-				Invoke-Command -Session $Session -ScriptBlock $scriptBlockOpenFile -ErrorAction Stop
+				Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
+                {
+                    if ((Test-Path -Path $using:DestinationFile -PathType Leaf) -and -not $using:Force)
+                    {
+                        if (-not $using:Force)
+                        {
+                            Write-Error 'File already exists.'
+                            return
+                        }
+                    }
+
+                    $writeStream = ([IO.FileInfo]$using:DestinationFile).Open([IO.FileMode]::Create)
+                }
 
 				$readStream = [IO.File]::OpenRead($SourceFile)
 				
@@ -114,15 +104,25 @@ function Copy-FNFileToSession
 		            $readStream.Close()
 	            }
 
-				Invoke-Command -Session $Session -ScriptBlock {$scriptBlockCloseFile}
+				Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
+                {
+                    if ($writeStream)
+                    {
+                        $writeStream.Close()
+
+                        [GC]::Collect()
+                    }
+                }
 			}
 		}
 	}
 
 	Process
 	{
+		$Source = Convert-Path $Source -ErrorAction SilentlyContinue
+
 		# If $source doesn't exist, exit
-		if (-not (Test-Path $Source))
+		if ($Source)
 		{
 			$PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage "Source path not found: '$Source'" -ErrorCategory ObjectNotFound))
 			return
@@ -143,17 +143,35 @@ function Copy-FNFileToSession
 					return
 				}
 			}
+						
+			# We need to use Convert-Path at the destination to ensure we're not dealing with a relative path, but this needs to be invoked on the remote computer
+			# Since if it is a relative path, it will be relative to the remote computer.
+			$Destination = Invoke-Command -Session $Session -ErrorAction Stop -Command `
+			{
+				$destination = Convert-Path $using:Destination -ErrorAction SilentlyContinue -ErrorVariable tempError
+
+				if (!$destination)
+				{
+					if ($tempError[0].FullyQualifiedErrorId -eq 'PathNotFound,Microsoft.PowerShell.Commands.ConvertPathCommand')
+					{
+						$destination = $tempError[0].TargetObject
+					}
+				}
+
+				return $destination
+			}
 			
-			# If $source is a container
+			# If $Source is a container
 			if (Test-Path $Source -PathType Container)
 			{
 				$directories = Get-ChildItem -Path $Source -Recurse -Directory -Force
-                
+
+                Push-Location $Source
                 foreach ($directory in $directories)
                 {
-                    $destinationDirectory = Join-Path $Destination $directory.FullName.SubString($Source.Length)
-
-                    Invoke-Command -Session $Session -ScriptBlock `
+                    $destinationDirectory = Join-Path $Destination (Resolve-Path $directory.FullName -Relative)
+                    
+                    Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                     {
                         if (-not (Test-Path $using:destinationDirectory -PathType Container))
                         {
@@ -182,10 +200,12 @@ function Copy-FNFileToSession
 		finally
 		{
 			# If we created our own PSSession, let's close it.
-			if ($ComputerName)
+			if ($ComputerName -and $Session)
 			{
 				Remove-PSSession -Session $Session
 			}
+
+            Pop-Location
 		}
 	}
 }
@@ -238,15 +258,6 @@ function Copy-FNFileFromSession
 				[Switch] $Force
 			)
 
-            $scriptBlockCloseFile = {
-				if ($readStream)
-				{
-					$readStream.Close()
-
-					[GC]::Collect()
-				}
-			}
-
             try
             {
                 if ((Test-Path -Path $DestinationFile -PathType Leaf) -and -not $Force)
@@ -260,7 +271,7 @@ function Copy-FNFileFromSession
 
 	            $writeStream = ([IO.FileInfo]$DestinationFile).Open([IO.FileMode]::Create)
 
-                $totalBytes = Invoke-Command -Session $Session -ScriptBlock `
+                $totalBytes = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                 {
                     $readStream = [IO.File]::OpenRead($using:SourceFile)
 
@@ -281,7 +292,7 @@ function Copy-FNFileFromSession
 
                 while ($bytesWritten -lt $totalBytes)
                 {
-                    Invoke-Command -Session $Session -ScriptBlock `
+                    Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                     {
                         # If the number of remaining bytes to read is lower than the buffer size, we set our buffer size accordingly and redim our array
 					    if ($bufferSize -gt $readStream.Length - $readStream.Position)
@@ -319,7 +330,15 @@ function Copy-FNFileFromSession
 		            $writeStream.Close()
 	            }
 
-				Invoke-Command -Session $Session -ScriptBlock {$scriptBlockCloseFile}
+				Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
+                {             
+                    if ($readStream)
+                    {
+                        $readStream.Close()
+
+                        [GC]::Collect()
+                    }
+                }
 			}
         }
     }
@@ -342,28 +361,44 @@ function Copy-FNFileFromSession
 				}
 			}
 
-            # If $source doesn't exist, exit
-		    if (-not (Invoke-Command -Session $Session -ScriptBlock {Test-Path $using:Source}))
+            # Expand $Source to ensure we are not dealing with relative paths
+			$Source = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Convert-Path $using:Source}
+
+			# If $source doesn't exist, exit
+		    if (!$Source)
 		    {
 			    $PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage "Source path not found: '$Source'" -ErrorCategory ObjectNotFound))
 			    return
 		    }
 
+			$Destination = Convert-Path $Destination -ErrorAction SilentlyContinue -ErrorVariable tempError
+
+			if (!$Destination)
+			{
+				if ($tempError[0].FullyQualifiedErrorId -eq 'PathNotFound,Microsoft.PowerShell.Commands.ConvertPathCommand')
+				{
+					$Destination = $tempError[0].TargetObject
+				}
+			}
+			
             # If $source is a container
-            if (Invoke-Command -Session $Session -ScriptBlock {Test-Path $using:Source -PathType Container})
+            if (Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Test-Path $using:Source -PathType Container})
             {
-                $directories = Invoke-Command -Session $Session -ScriptBlock {Get-ChildItem -Path $using:Source -Recurse -Directory -Force}
+                $directories = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Get-ChildItem -Path $using:Source -Recurse -Directory -Force}
+                
+				# Push location to our source path
+                Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Push-Location $using:Source}
 
                 foreach ($directory in $directories)
                 {
-                    $destinationDirectory = Join-Path $Destination $directory.FullName.SubString($Source.Length)
+                    $destinationDirectory = Join-Path $Destination (Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Resolve-Path $using:directory.FullName -Relative})
                     
                     if (-not (Test-Path $destinationDirectory -PathType Container))
                     {
                         [void] (New-Item -Path $destinationDirectory -ItemType Directory -Force -ErrorAction Stop)
                     }
 
-                    $files = Invoke-Command -Session $Session -ScriptBlock {Get-ChildItem -Path $using:directory.FullName -File -Force}
+                    $files = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Get-ChildItem -Path $using:directory.FullName -File -Force}
 
                     foreach ($file in $files)
                     {
@@ -383,11 +418,16 @@ function Copy-FNFileFromSession
 		}
 		finally
 		{
-			# If we created our own PSSession, let's close it.
-			if ($ComputerName)
-			{
-				Remove-PSSession -Session $Session
-			}
+			if ($Session)
+            {
+                Invoke-Command -Session $Session -ScriptBlock {Pop-Location}
+
+                # If we created our own PSSession, let's close it.
+			    if ($ComputerName)
+			    {
+				    Remove-PSSession -Session $Session
+			    }
+            }
         }
 	}
 }
