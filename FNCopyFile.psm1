@@ -1,54 +1,54 @@
 function Copy-FNFileToSession
 {
-	[CmdletBinding()]
+    [CmdletBinding()]
 
-	param
-	(
-		[Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
-		[Alias('PSPath')]
-		[String] $Source,
+    param
+    (
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
+        [Alias('PSPath')]
+        [String] $Source,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 1)]
-		[String] $Destination,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 1)]
+        [String] $Destination,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'ComputerName')]
-		[String] $ComputerName,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'ComputerName')]
+        [String] $ComputerName,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'Session')]
-		[System.Management.Automation.Runspaces.PSSession] $Session,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'Session')]
+        [System.Management.Automation.Runspaces.PSSession] $Session,
 
-		[Parameter(ValueFromPipelineByPropertyName)]
-		[Int] $BufferSize = 4MB,
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Int] $BufferSize = 4MB,
 
-		[Parameter(ValueFromPipelineByPropertyName)]
-		[Switch] $Force
-	)
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Switch] $Force
+    )
 
-	Begin
-	{
-		function InternalCopyToSession
-		{
-			[CmdletBinding()]
+    Begin
+    {
+        function InternalCopyToSession
+        {
+            [CmdletBinding()]
 
-			param
-			(
-				[Parameter(Mandatory)]
-				[String] $SourceFile,
+            param
+            (
+                [Parameter(Mandatory)]
+                [String] $SourceFile,
 
-				[Parameter(Mandatory)]
-				[String] $DestinationFile,
+                [Parameter(Mandatory)]
+                [String] $DestinationFile,
 
-				[Parameter(Mandatory)]
-				[System.Management.Automation.Runspaces.PSSession] $Session,
+                [Parameter(Mandatory)]
+                [System.Management.Automation.Runspaces.PSSession] $Session,
 
-				[Int] $BufferSize,
+                [Int] $BufferSize,
 
-				[Switch] $Force
-			)
+                [Switch] $Force
+            )
 
-			try
-			{
-				Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
+            try
+            {
+                Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                 {
                     if ((Test-Path -Path $using:DestinationFile -PathType Leaf) -and -not $using:Force)
                     {
@@ -62,49 +62,49 @@ function Copy-FNFileToSession
                     $writeStream = ([IO.FileInfo]$using:DestinationFile).Open([IO.FileMode]::Create)
                 }
 
-				$readStream = [IO.File]::OpenRead($SourceFile)
-				
-				# Initial buffer size
-				if ($BufferSize -gt $readStream.Length)
-				{
-					$BufferSize = $readStream.Length
-				}
+                $readStream = [IO.File]::OpenRead($SourceFile)
+                
+                # Initial buffer size
+                if ($BufferSize -gt $readStream.Length)
+                {
+                    $BufferSize = $readStream.Length
+                }
 
-				$buffer = New-Object byte[] $BufferSize
-				
-				while ($readStream.Length -gt $readStream.Position) 
-				{
-					# If the number of remaining bytes to read is lower than the buffer size, we set our buffer size accordingly and redim our array
-					if ($BufferSize -gt $readStream.Length - $readStream.Position)
-					{
-						$BufferSize = $readStream.Length - $readStream.Position
-						$buffer = New-Object byte[] $BufferSize
-					}
+                $buffer = New-Object byte[] $BufferSize
+                
+                while ($readStream.Length -gt $readStream.Position) 
+                {
+                    # If the number of remaining bytes to read is lower than the buffer size, we set our buffer size accordingly and redim our array
+                    if ($BufferSize -gt $readStream.Length - $readStream.Position)
+                    {
+                        $BufferSize = $readStream.Length - $readStream.Position
+                        $buffer = New-Object byte[] $BufferSize
+                    }
 
-					$bytesRead = 0
+                    $bytesRead = 0
 
-					# We do this to ensure that we always have a full buffer array
-					while ($bytesRead -lt $BufferSize)
-					{
-						$bytesRead += $readStream.Read($buffer, $bytesRead, $BufferSize - $bytesRead)
-					}
+                    # We do this to ensure that we always have a full buffer array
+                    while ($bytesRead -lt $BufferSize)
+                    {
+                        $bytesRead += $readStream.Read($buffer, $bytesRead, $BufferSize - $bytesRead)
+                    }
 
-					Invoke-Command -Session $Session -ScriptBlock {$writeStream.Write($using:buffer, 0, $using:BufferSize)} -ErrorAction Stop
-					Write-Progress -Activity "Copying $SourceFile to $DestinationFile over WinRM, BufferSize = $BufferSize" -PercentComplete ($readStream.Position / $readStream.Length * 100) -Status "$($readStream.Position) / $($readStream.Length) bytes processed"
-				}
-			}
-			catch
-			{
-				throw $_
-			}
-			finally
-			{
-				if ($readStream)
-				{
-		            $readStream.Close()
-	            }
+                    Invoke-Command -Session $Session -ScriptBlock {$writeStream.Write($using:buffer, 0, $using:BufferSize)} -ErrorAction Stop
+                    Write-Progress -Activity "Copying $SourceFile to $DestinationFile over WinRM, BufferSize = $BufferSize" -PercentComplete ($readStream.Position / $readStream.Length * 100) -Status "$($readStream.Position) / $($readStream.Length) bytes processed"
+                }
+            }
+            catch
+            {
+                throw $_
+            }
+            finally
+            {
+                if ($readStream)
+                {
+                    $readStream.Close()
+                }
 
-				Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
+                Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                 {
                     if ($writeStream)
                     {
@@ -113,58 +113,58 @@ function Copy-FNFileToSession
                         [GC]::Collect()
                     }
                 }
-			}
-		}
-	}
+            }
+        }
+    }
 
-	Process
-	{
-		$Source = Convert-Path $Source -ErrorAction SilentlyContinue
+    Process
+    {
+        $Source = Convert-Path $Source -ErrorAction SilentlyContinue
 
-		# If $source doesn't exist, exit
-		if ($Source)
-		{
-			$PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage "Source path not found: '$Source'" -ErrorCategory ObjectNotFound))
-			return
-		}
+        # If $source doesn't exist, exit
+        if ($Source)
+        {
+            $PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage "Source path not found: '$Source'" -ErrorCategory ObjectNotFound))
+            return
+        }
 
-		# We have the try up here so we can have a finally block where we check if the session needs closing
-		# This means that even if the command is aborted, the finally statement is always executed and we don't leave PSSessions lingering around
-		try
-		{
-			# If we specified $ComputerName instead of a session, let's open the session now
-			if ($ComputerName)
-			{
-				$Session = New-PSSession -ComputerName $ComputerName -ErrorVariable sessionError -ErrorAction SilentlyContinue
+        # We have the try up here so we can have a finally block where we check if the session needs closing
+        # This means that even if the command is aborted, the finally statement is always executed and we don't leave PSSessions lingering around
+        try
+        {
+            # If we specified $ComputerName instead of a session, let's open the session now
+            if ($ComputerName)
+            {
+                $Session = New-PSSession -ComputerName $ComputerName -ErrorVariable sessionError -ErrorAction SilentlyContinue
 
-				if ($sessionError)
-				{
-					$PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage $sessionError.Exception.Message))
-					return
-				}
-			}
-						
-			# We need to use Convert-Path at the destination to ensure we're not dealing with a relative path, but this needs to be invoked on the remote computer
-			# Since if it is a relative path, it will be relative to the remote computer.
-			$Destination = Invoke-Command -Session $Session -ErrorAction Stop -Command `
-			{
-				$destination = Convert-Path $using:Destination -ErrorAction SilentlyContinue -ErrorVariable tempError
+                if ($sessionError)
+                {
+                    $PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage $sessionError.Exception.Message))
+                    return
+                }
+            }
+                        
+            # We need to use Convert-Path at the destination to ensure we're not dealing with a relative path, but this needs to be invoked on the remote computer
+            # Since if it is a relative path, it will be relative to the remote computer.
+            $Destination = Invoke-Command -Session $Session -ErrorAction Stop -Command `
+            {
+                $destination = Convert-Path $using:Destination -ErrorAction SilentlyContinue -ErrorVariable tempError
 
-				if (!$destination)
-				{
-					if ($tempError[0].FullyQualifiedErrorId -eq 'PathNotFound,Microsoft.PowerShell.Commands.ConvertPathCommand')
-					{
-						$destination = $tempError[0].TargetObject
-					}
-				}
+                if (!$destination)
+                {
+                    if ($tempError[0].FullyQualifiedErrorId -eq 'PathNotFound,Microsoft.PowerShell.Commands.ConvertPathCommand')
+                    {
+                        $destination = $tempError[0].TargetObject
+                    }
+                }
 
-				return $destination
-			}
-			
-			# If $Source is a container
-			if (Test-Path $Source -PathType Container)
-			{
-				$directories = Get-ChildItem -Path $Source -Recurse -Directory -Force
+                return $destination
+            }
+            
+            # If $Source is a container
+            if (Test-Path $Source -PathType Container)
+            {
+                $directories = Get-ChildItem -Path $Source -Recurse -Directory -Force
 
                 Push-Location $Source
                 foreach ($directory in $directories)
@@ -187,89 +187,89 @@ function Copy-FNFileToSession
                         InternalCopyToSession -Source $file.FullName -Destination $destinationFile -BufferSize $BufferSize -Force:$Force -Session $Session
                     }
                 }
-			}
-			else
-			{
-				InternalCopyToSession -SourceFile $Source -DestinationFile $Destination -BufferSize $BufferSize -Force:$Force -Session $Session
-			}
-		}
-		catch
-		{
-			throw $_
-		}
-		finally
-		{
-			# If we created our own PSSession, let's close it.
-			if ($ComputerName -and $Session)
-			{
-				Remove-PSSession -Session $Session
-			}
+            }
+            else
+            {
+                InternalCopyToSession -SourceFile $Source -DestinationFile $Destination -BufferSize $BufferSize -Force:$Force -Session $Session
+            }
+        }
+        catch
+        {
+            throw $_
+        }
+        finally
+        {
+            # If we created our own PSSession, let's close it.
+            if ($ComputerName -and $Session)
+            {
+                Remove-PSSession -Session $Session
+            }
 
             Pop-Location
-		}
-	}
+        }
+    }
 }
 
 function Copy-FNFileFromSession
 {
-	[CmdletBinding()]
+    [CmdletBinding()]
 
-	param
-	(
-		[Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
-		[Alias('PSPath')]
-		[String] $Source,
+    param
+    (
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
+        [Alias('PSPath')]
+        [String] $Source,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 1)]
-		[String] $Destination,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 1)]
+        [String] $Destination,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'ComputerName')]
-		[String] $ComputerName,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'ComputerName')]
+        [String] $ComputerName,
 
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'Session')]
-		[System.Management.Automation.Runspaces.PSSession] $Session,
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName, Position = 2, ParameterSetName = 'Session')]
+        [System.Management.Automation.Runspaces.PSSession] $Session,
 
-		[Parameter(ValueFromPipelineByPropertyName)]
-		[Int] $BufferSize = 4MB,
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Int] $BufferSize = 4MB,
 
-		[Parameter(ValueFromPipelineByPropertyName)]
-		[Switch] $Force
-	)
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Switch] $Force
+    )
 
     Begin
-	{
-		function InternalCopyFromSession
-		{
-			[CmdletBinding()]
+    {
+        function InternalCopyFromSession
+        {
+            [CmdletBinding()]
 
-			param
-			(
-				[Parameter(Mandatory)]
-				[String] $SourceFile,
+            param
+            (
+                [Parameter(Mandatory)]
+                [String] $SourceFile,
 
-				[Parameter(Mandatory)]
-				[String] $DestinationFile,
+                [Parameter(Mandatory)]
+                [String] $DestinationFile,
 
-				[Parameter(Mandatory)]
-				[System.Management.Automation.Runspaces.PSSession] $Session,
+                [Parameter(Mandatory)]
+                [System.Management.Automation.Runspaces.PSSession] $Session,
 
-				[Int] $BufferSize,
+                [Int] $BufferSize,
 
-				[Switch] $Force
-			)
+                [Switch] $Force
+            )
 
             try
             {
                 if ((Test-Path -Path $DestinationFile -PathType Leaf) -and -not $Force)
-	            {
-		            if (-not $Force)
-		            {
-			            Write-Error 'File already exists.'
-			            return
-		            }
-	            }
+                {
+                    if (-not $Force)
+                    {
+                        Write-Error 'File already exists.'
+                        return
+                    }
+                }
 
-	            $writeStream = ([IO.FileInfo]$DestinationFile).Open([IO.FileMode]::Create)
+                $writeStream = ([IO.FileInfo]$DestinationFile).Open([IO.FileMode]::Create)
 
                 $totalBytes = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                 {
@@ -279,11 +279,11 @@ function Copy-FNFileFromSession
                     $bufferSize = $using:BufferSize
 
                     if ($bufferSize -gt $readStream.Length)
-				    {
-					    $bufferSize = $readStream.Length
-				    }
+                    {
+                        $bufferSize = $readStream.Length
+                    }
 
-				    $buffer = New-Object byte[] $bufferSize
+                    $buffer = New-Object byte[] $bufferSize
 
                     $readStream.Length
                 }
@@ -295,19 +295,19 @@ function Copy-FNFileFromSession
                     Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                     {
                         # If the number of remaining bytes to read is lower than the buffer size, we set our buffer size accordingly and redim our array
-					    if ($bufferSize -gt $readStream.Length - $readStream.Position)
-					    {
-						    $bufferSize = $readStream.Length - $readStream.Position
-						    $buffer = New-Object byte[] $bufferSize
-					    }
+                        if ($bufferSize -gt $readStream.Length - $readStream.Position)
+                        {
+                            $bufferSize = $readStream.Length - $readStream.Position
+                            $buffer = New-Object byte[] $bufferSize
+                        }
 
                         $bytesRead = 0
 
                         # We do this to ensure that we always have a full buffer array
-					    while ($bytesRead -lt $bufferSize)
-					    {
-						    $bytesRead += $readStream.Read($buffer, $bytesRead, $bufferSize - $bytesRead)
-					    }
+                        while ($bytesRead -lt $bufferSize)
+                        {
+                            $bytesRead += $readStream.Read($buffer, $bytesRead, $bufferSize - $bytesRead)
+                        }
                         
                         # Cheap way to stop the pipeline from expanding the $buffer
                         @{'buffer' = $buffer}
@@ -320,17 +320,17 @@ function Copy-FNFileFromSession
                 }
             }
             catch
-			{
-				throw $_
-			}
-			finally
-			{
-				if ($writeStream)
-				{
-		            $writeStream.Close()
-	            }
+            {
+                throw $_
+            }
+            finally
+            {
+                if ($writeStream)
+                {
+                    $writeStream.Close()
+                }
 
-				Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
+                Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock `
                 {             
                     if ($readStream)
                     {
@@ -339,54 +339,54 @@ function Copy-FNFileFromSession
                         [GC]::Collect()
                     }
                 }
-			}
+            }
         }
     }
 
     Process
-	{
+    {
         # We have the try up here so we can have a finally block where we check if the session needs closing
-		# This means that even if the command is aborted, the finally statement is always executed and we don't leave PSSessions lingering around
-		try
-		{
-			# If we specified $ComputerName instead of a session, let's open the session now
-			if ($ComputerName)
-			{
-				$Session = New-PSSession -ComputerName $ComputerName -ErrorVariable sessionError -ErrorAction SilentlyContinue
+        # This means that even if the command is aborted, the finally statement is always executed and we don't leave PSSessions lingering around
+        try
+        {
+            # If we specified $ComputerName instead of a session, let's open the session now
+            if ($ComputerName)
+            {
+                $Session = New-PSSession -ComputerName $ComputerName -ErrorVariable sessionError -ErrorAction SilentlyContinue
 
-				if ($sessionError)
-				{
-					$PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage $sessionError.Exception.Message))
-					return
-				}
-			}
+                if ($sessionError)
+                {
+                    $PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage $sessionError.Exception.Message))
+                    return
+                }
+            }
 
             # Expand $Source to ensure we are not dealing with relative paths
-			$Source = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Convert-Path $using:Source}
+            $Source = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Convert-Path $using:Source}
 
-			# If $source doesn't exist, exit
-		    if (!$Source)
-		    {
-			    $PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage "Source path not found: '$Source'" -ErrorCategory ObjectNotFound))
-			    return
-		    }
+            # If $source doesn't exist, exit
+            if (!$Source)
+            {
+                $PSCmdlet.WriteError((New-ErrorRecord -ErrorMessage "Source path not found: '$Source'" -ErrorCategory ObjectNotFound))
+                return
+            }
 
-			$Destination = Convert-Path $Destination -ErrorAction SilentlyContinue -ErrorVariable tempError
+            $Destination = Convert-Path $Destination -ErrorAction SilentlyContinue -ErrorVariable tempError
 
-			if (!$Destination)
-			{
-				if ($tempError[0].FullyQualifiedErrorId -eq 'PathNotFound,Microsoft.PowerShell.Commands.ConvertPathCommand')
-				{
-					$Destination = $tempError[0].TargetObject
-				}
-			}
-			
+            if (!$Destination)
+            {
+                if ($tempError[0].FullyQualifiedErrorId -eq 'PathNotFound,Microsoft.PowerShell.Commands.ConvertPathCommand')
+                {
+                    $Destination = $tempError[0].TargetObject
+                }
+            }
+            
             # If $source is a container
             if (Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Test-Path $using:Source -PathType Container})
             {
                 $directories = Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Get-ChildItem -Path $using:Source -Recurse -Directory -Force}
                 
-				# Push location to our source path
+                # Push location to our source path
                 Invoke-Command -Session $Session -ErrorAction Stop -ScriptBlock {Push-Location $using:Source}
 
                 foreach ($directory in $directories)
@@ -413,23 +413,23 @@ function Copy-FNFileFromSession
             }
         }
         catch
-		{
-			throw $_
-		}
-		finally
-		{
-			if ($Session)
+        {
+            throw $_
+        }
+        finally
+        {
+            if ($Session)
             {
                 Invoke-Command -Session $Session -ScriptBlock {Pop-Location}
 
                 # If we created our own PSSession, let's close it.
-			    if ($ComputerName)
-			    {
-				    Remove-PSSession -Session $Session
-			    }
+                if ($ComputerName)
+                {
+                    Remove-PSSession -Session $Session
+                }
             }
         }
-	}
+    }
 }
 
 function New-ErrorRecord
